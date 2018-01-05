@@ -1,9 +1,4 @@
-package com.amazon.topology;
-
-import com.dashoptimization.XPRB;
-import com.dashoptimization.XPRBexpr;
-import com.dashoptimization.XPRBprob;
-import com.dashoptimization.XPRBvar;
+package com.topology.f2p;
 
 import java.util.*;
 
@@ -28,8 +23,8 @@ public class ProblemGenerator {
     Map<Order, Map<FC, Double>> sortedShippingDistances = new HashMap<>();
     Map<Order, Map<FC, Double>> sortedShippingCosts = new HashMap<>();
     Map<Order, List<Shipment>> shipments = new HashMap<>();
-    XPRB bcl = new XPRB();
-    XPRBprob problem = bcl.newProb("Problem");
+//    XPRB bcl = new XPRB();
+//    XPRBprob problem = bcl.newProb("Problem");
 
     public ProblemGenerator(Sortable sortable) {
         this.sortable = sortable;
@@ -292,12 +287,12 @@ public class ProblemGenerator {
             targetSplitContext.newFC.inventories.put(asin, current);
         }
         //update orignal FC inventory
-        for (ASIN asin : targetSplitContext.originalShipment.units.keySet()) {
-            if(targetSplitContext.content.containsKey(asin)){
-                int current = targetSplitContext.originalShipment.fc.inventories.get(asin);
-                current -= targetSplitContext.originalShipment.units.get(asin);
-                targetSplitContext.originalShipment.fc.inventories.put(asin, current);
-            }
+        for(ASIN asin : targetSplitContext.content.keySet()){
+            targetSplitContext.originalShipment.units.remove(asin);
+
+            int current = targetSplitContext.originalShipment.fc.inventories.get(asin);
+            current -= targetSplitContext.originalShipment.units.get(asin);
+            targetSplitContext.originalShipment.fc.inventories.put(asin, current);
         }
     }
 
@@ -401,218 +396,218 @@ public class ProblemGenerator {
 
     }
 
-    void buildModel() {
-        long startBuildingModel = System.currentTimeMillis();
-        //variable definition
-        System.out.println("Start building variables...");
-        Map<FC, Map<ASIN, XPRBvar>> inventoryVars = new LinkedHashMap<>();
-        Map<FC, Map<Order, XPRBvar>> FCOrderVars = new LinkedHashMap<>();
-        Map<Order, Map<FC, Map<ASIN, XPRBvar>>> orderFCASINVars = new LinkedHashMap<>();
-        for (Order order : orders) {
-            if (!orderFCASINVars.containsKey(order)) {
-                orderFCASINVars.put(order, new LinkedHashMap<>());
-            }
-
-            for (FC fc : FCs) {
-                double thresholdDistance = (double) sortedShippingDistances.get(order).values().toArray()[FIRST_K_CLOSEST];
-                if (sortedShippingDistances.get(order).get(fc) > thresholdDistance) {
-                    continue;
-                }
-
-                if (!FCOrderVars.containsKey(fc)) {
-                    FCOrderVars.put(fc, new LinkedHashMap<>());
-                }
-
-                if (!FCOrderVars.get(fc).containsKey(order)) {
-                    XPRBvar fo = problem.newVar("OF" + "_" + fc.id + "_" + order.id, XPRB.BV);
-                    FCOrderVars.get(fc).put(order, fo);
-                }
-
-                if (!orderFCASINVars.get(order).containsKey(fc)) {
-                    orderFCASINVars.get(order).put(fc, new LinkedHashMap<>());
-                }
-
-                for (ASIN asin : order.units.keySet()) {
-                    XPRBvar ofa = problem.newVar("AF" + "_" + fc.id + "_" + order.id + "_" + asin.id,
-                            XPRB.UI, 0, 100);
-                    orderFCASINVars.get(order).get(fc).put(asin, ofa);
-
-                    if (!inventoryVars.containsKey(fc)) {
-                        inventoryVars.put(fc, new LinkedHashMap<>());
-                    }
-
-
-                    if (!inventoryVars.get(fc).containsKey(asin)) {
-                        XPRBvar inv = problem.newVar("IN" + "_" + fc.id + "_" + asin.id, XPRB.UI, 0, 10000);
-                        inventoryVars.get(fc).put(asin, inv);
-                    }
-                }
-            }
-        }
-
-        System.out.println("Building variables complete");
-        System.out.println("Start building objective...");
-        //objective
-        XPRBexpr obj = new XPRBexpr();
-
-        System.out.println("  Building shipping cost");
-        for (Order order : orderFCASINVars.keySet()) {
-            if (Integer.valueOf(order.id) % 100 == 0)
-                System.out.println("    Handling Order " + order.id);
-            for (FC fc : orderFCASINVars.get(order).keySet()) {
-                double shippingDistance = ShippingCost.EclidDistance(fc.x, fc.y, order.x, order.y) * UNIT_DISTANCE_COST;
-                for (ASIN asin : orderFCASINVars.get(order).get(fc).keySet()) {
-                    obj.add(orderFCASINVars.get(order).get(fc).get(asin).mul(asin.weight * ALPHA * shippingDistance).add(BETA));
-                }
-            }
-        }
-        System.out.println("  Building shipping cost complete");
-
-        System.out.println("  Building unit processing cost");
-        for (Order order : orderFCASINVars.keySet()) {
-            if (Integer.valueOf(order.id) % 100 == 0)
-                System.out.println("    Handling Order " + order.id);
-            for (FC fc : orderFCASINVars.get(order).keySet()) {
-                for (ASIN asin : orderFCASINVars.get(order).get(fc).keySet()) {
-                    obj.add(orderFCASINVars.get(order).get(fc).get(asin).mul(fc.unitProcessingCost));
-                }
-            }
-        }
-        System.out.println("  Building unit processing cost complete");
-
-        System.out.println("  Building packaging cost");
-        for (FC fc : FCs) {
-            if (!FCOrderVars.containsKey(fc))
-                continue;
-            System.out.println("  Handling FC " + fc.id);
-            for (Order order : FCOrderVars.get(fc).keySet()) {
-                obj.add(FCOrderVars.get(fc).get(order).mul(fc.packagingCost));
-            }
-        }
-        System.out.println("  Building packaging cost complete");
-
-        System.out.println("  Building storage cost");
-        for (FC fc : FCs) {
-            if (!inventoryVars.containsKey(fc))
-                continue;
-            System.out.println("    Handling FC " + fc.id);
-            for (ASIN asin : inventoryVars.get(fc).keySet()) {
-                obj.add(inventoryVars.get(fc).get(asin).mul(fc.unitStorageCost));
-            }
-        }
-        System.out.println("  Building storage cost complete");
-
-        problem.setObj(obj);
-        System.out.println("Building objective complete");
-        problem.setSense(XPRB.MINIM);
-
-
-        //storage capacity constraint
-        System.out.println("Start building storage capacity constraint...");
-        for (FC fc : FCs) {
-            System.out.println("  Handling FC " + fc.id);
-            if (!inventoryVars.containsKey(fc))
-                continue;
-            XPRBexpr ctr = new XPRBexpr();
-            for (ASIN asin : inventoryVars.get(fc).keySet()) {
-                ctr.add(inventoryVars.get(fc).get(asin).mul(1));
-            }
-            problem.newCtr(fc.id + "_StorageCap", ctr.lEql(fc.storageCapacity));
-        }
-        System.out.println("Building storage capacity constraint complete");
-        //inventory available constraint
-        System.out.println("Start building inventory available constraint...");
-        for (FC fc : FCs) {
-            System.out.println("  Handling FC " + fc.id);
-            if (!inventoryVars.containsKey(fc))
-                continue;
-            for (ASIN asin : inventoryVars.get(fc).keySet()) {
-                XPRBexpr ctr = new XPRBexpr();
-                ctr.add(inventoryVars.get(fc).get(asin).mul(-1));
-
-                for (Order order : orderFCASINVars.keySet()) {
-                    if (!orderFCASINVars.get(order).containsKey(fc))
-                        continue;
-                    if (!orderFCASINVars.get(order).get(fc).containsKey(asin))
-                        continue;
-                    ctr.add(orderFCASINVars.get(order).get(fc).get(asin).mul(1));
-                }
-                problem.newCtr(fc.id + "_" + asin.id + "_InventoryAvailable", ctr.lEql(0));
-            }
-        }
-        System.out.println("Building inventory available constraint complete");
-
-        //order fulfillment constraint
-        System.out.println("Start building order fulfillment constraint...");
-        for (Order order : orders) {
-            if (Integer.valueOf(order.id) % 100 == 0)
-                System.out.println("  Handling Order " + order.id);
-            for (ASIN asin : order.units.keySet()) {
-                XPRBexpr ctr = new XPRBexpr();
-                for (FC fc : FCs) {
-                    if (!orderFCASINVars.get(order).containsKey(fc))
-                        continue;
-                    ctr.add(orderFCASINVars.get(order).get(fc).get(asin).mul(1));
-                }
-                problem.newCtr("OF" + order.id + "_" + asin.id, ctr.eql(order.units.get(asin)));
-            }
-        }
-        System.out.println("Building order fulfillment constraint complete");
-
-        //order fulfillment compatibility constraint
-        System.out.println("Start building /order fulfillment compatibility constraint...");
-        for (Order order : orders) {
-            if (Integer.valueOf(order.id) % 100 == 0)
-                System.out.println("  Handling Order " + order.id);
-            for (ASIN asin : order.units.keySet()) {
-                for (FC fc : FCs) {
-                    if (!orderFCASINVars.get(order).containsKey(fc))
-                        continue;
-                    if (!FCOrderVars.get(fc).containsKey(order))
-                        continue;
-                    XPRBexpr ctr = new XPRBexpr();
-                    ctr.add(orderFCASINVars.get(order).get(fc).get(asin).mul(1));
-                    ctr.add(FCOrderVars.get(fc).get(order).mul(-LARGE_POSITIVE));
-                    problem.newCtr("Compatible_" + order.id + "_" + asin.id + "_" + fc.id, ctr.lEql(0));
-                }
-            }
-        }
-        System.out.println("Building order fulfillment compatibility complete");
-
-        System.out.println("Building model time " + (System.currentTimeMillis() - startBuildingModel));
-
-        long startSolving = System.currentTimeMillis();
-        problem.mipOptimise();
-        System.out.println("Solving time " + (System.currentTimeMillis() - startSolving));
-        if (problem.getMIPStat() == XPRB.MIP_INFEAS) {
-            System.out.println("MIP Infeasible!");
-        } else if (problem.getMIPStat() == XPRB.MIP_OPTIMAL) {
-            System.out.println("Objective: " + problem.getObjVal());
-            System.out.println("------Inventory------");
-            for (FC fc : inventoryVars.keySet()) {
-                for (ASIN asin : inventoryVars.get(fc).keySet()) {
-                    if (Math.abs(inventoryVars.get(fc).get(asin).getSol()) <= INTEGER_GAP)
-                        continue;
-                    System.out.println("++FC" + fc.id + "  " + asin.id + "  " + inventoryVars.get(fc).get(asin).getSol());
-                }
-            }
-            System.out.println();
-            System.out.println("------------Order Fulfillment--------");
-            for (Order order : orders) {
-                System.out.println("++Order " + order.id);
-                for (FC fc : FCs) {
-                    if (!orderFCASINVars.get(order).containsKey(fc))
-                        continue;
-                    for (ASIN asin : order.units.keySet()) {
-                        if (Math.abs(orderFCASINVars.get(order).get(fc).get(asin).getSol()) <= INTEGER_GAP)
-                            continue;
-                        System.out.println("   FC " + fc.id + "     ASIN " + asin.id + "   " + orderFCASINVars.get(order).get(fc).get(asin).getSol());
-                    }
-                }
-            }
-        } else {
-            System.out.println(problem.getMIPStat());
-        }
-
-    }
+//    void buildModel() {
+//        long startBuildingModel = System.currentTimeMillis();
+//        //variable definition
+//        System.out.println("Start building variables...");
+//        Map<FC, Map<ASIN, XPRBvar>> inventoryVars = new LinkedHashMap<>();
+//        Map<FC, Map<Order, XPRBvar>> FCOrderVars = new LinkedHashMap<>();
+//        Map<Order, Map<FC, Map<ASIN, XPRBvar>>> orderFCASINVars = new LinkedHashMap<>();
+//        for (Order order : orders) {
+//            if (!orderFCASINVars.containsKey(order)) {
+//                orderFCASINVars.put(order, new LinkedHashMap<>());
+//            }
+//
+//            for (FC fc : FCs) {
+//                double thresholdDistance = (double) sortedShippingDistances.get(order).values().toArray()[FIRST_K_CLOSEST];
+//                if (sortedShippingDistances.get(order).get(fc) > thresholdDistance) {
+//                    continue;
+//                }
+//
+//                if (!FCOrderVars.containsKey(fc)) {
+//                    FCOrderVars.put(fc, new LinkedHashMap<>());
+//                }
+//
+//                if (!FCOrderVars.get(fc).containsKey(order)) {
+//                    XPRBvar fo = problem.newVar("OF" + "_" + fc.id + "_" + order.id, XPRB.BV);
+//                    FCOrderVars.get(fc).put(order, fo);
+//                }
+//
+//                if (!orderFCASINVars.get(order).containsKey(fc)) {
+//                    orderFCASINVars.get(order).put(fc, new LinkedHashMap<>());
+//                }
+//
+//                for (ASIN asin : order.units.keySet()) {
+//                    XPRBvar ofa = problem.newVar("AF" + "_" + fc.id + "_" + order.id + "_" + asin.id,
+//                            XPRB.UI, 0, 100);
+//                    orderFCASINVars.get(order).get(fc).put(asin, ofa);
+//
+//                    if (!inventoryVars.containsKey(fc)) {
+//                        inventoryVars.put(fc, new LinkedHashMap<>());
+//                    }
+//
+//
+//                    if (!inventoryVars.get(fc).containsKey(asin)) {
+//                        XPRBvar inv = problem.newVar("IN" + "_" + fc.id + "_" + asin.id, XPRB.UI, 0, 10000);
+//                        inventoryVars.get(fc).put(asin, inv);
+//                    }
+//                }
+//            }
+//        }
+//
+//        System.out.println("Building variables complete");
+//        System.out.println("Start building objective...");
+//        //objective
+//        XPRBexpr obj = new XPRBexpr();
+//
+//        System.out.println("  Building shipping cost");
+//        for (Order order : orderFCASINVars.keySet()) {
+//            if (Integer.valueOf(order.id) % 100 == 0)
+//                System.out.println("    Handling Order " + order.id);
+//            for (FC fc : orderFCASINVars.get(order).keySet()) {
+//                double shippingDistance = ShippingCost.EclidDistance(fc.x, fc.y, order.x, order.y) * UNIT_DISTANCE_COST;
+//                for (ASIN asin : orderFCASINVars.get(order).get(fc).keySet()) {
+//                    obj.add(orderFCASINVars.get(order).get(fc).get(asin).mul(asin.weight * ALPHA * shippingDistance).add(BETA));
+//                }
+//            }
+//        }
+//        System.out.println("  Building shipping cost complete");
+//
+//        System.out.println("  Building unit processing cost");
+//        for (Order order : orderFCASINVars.keySet()) {
+//            if (Integer.valueOf(order.id) % 100 == 0)
+//                System.out.println("    Handling Order " + order.id);
+//            for (FC fc : orderFCASINVars.get(order).keySet()) {
+//                for (ASIN asin : orderFCASINVars.get(order).get(fc).keySet()) {
+//                    obj.add(orderFCASINVars.get(order).get(fc).get(asin).mul(fc.unitProcessingCost));
+//                }
+//            }
+//        }
+//        System.out.println("  Building unit processing cost complete");
+//
+//        System.out.println("  Building packaging cost");
+//        for (FC fc : FCs) {
+//            if (!FCOrderVars.containsKey(fc))
+//                continue;
+//            System.out.println("  Handling FC " + fc.id);
+//            for (Order order : FCOrderVars.get(fc).keySet()) {
+//                obj.add(FCOrderVars.get(fc).get(order).mul(fc.packagingCost));
+//            }
+//        }
+//        System.out.println("  Building packaging cost complete");
+//
+//        System.out.println("  Building storage cost");
+//        for (FC fc : FCs) {
+//            if (!inventoryVars.containsKey(fc))
+//                continue;
+//            System.out.println("    Handling FC " + fc.id);
+//            for (ASIN asin : inventoryVars.get(fc).keySet()) {
+//                obj.add(inventoryVars.get(fc).get(asin).mul(fc.unitStorageCost));
+//            }
+//        }
+//        System.out.println("  Building storage cost complete");
+//
+//        problem.setObj(obj);
+//        System.out.println("Building objective complete");
+//        problem.setSense(XPRB.MINIM);
+//
+//
+//        //storage capacity constraint
+//        System.out.println("Start building storage capacity constraint...");
+//        for (FC fc : FCs) {
+//            System.out.println("  Handling FC " + fc.id);
+//            if (!inventoryVars.containsKey(fc))
+//                continue;
+//            XPRBexpr ctr = new XPRBexpr();
+//            for (ASIN asin : inventoryVars.get(fc).keySet()) {
+//                ctr.add(inventoryVars.get(fc).get(asin).mul(1));
+//            }
+//            problem.newCtr(fc.id + "_StorageCap", ctr.lEql(fc.storageCapacity));
+//        }
+//        System.out.println("Building storage capacity constraint complete");
+//        //inventory available constraint
+//        System.out.println("Start building inventory available constraint...");
+//        for (FC fc : FCs) {
+//            System.out.println("  Handling FC " + fc.id);
+//            if (!inventoryVars.containsKey(fc))
+//                continue;
+//            for (ASIN asin : inventoryVars.get(fc).keySet()) {
+//                XPRBexpr ctr = new XPRBexpr();
+//                ctr.add(inventoryVars.get(fc).get(asin).mul(-1));
+//
+//                for (Order order : orderFCASINVars.keySet()) {
+//                    if (!orderFCASINVars.get(order).containsKey(fc))
+//                        continue;
+//                    if (!orderFCASINVars.get(order).get(fc).containsKey(asin))
+//                        continue;
+//                    ctr.add(orderFCASINVars.get(order).get(fc).get(asin).mul(1));
+//                }
+//                problem.newCtr(fc.id + "_" + asin.id + "_InventoryAvailable", ctr.lEql(0));
+//            }
+//        }
+//        System.out.println("Building inventory available constraint complete");
+//
+//        //order fulfillment constraint
+//        System.out.println("Start building order fulfillment constraint...");
+//        for (Order order : orders) {
+//            if (Integer.valueOf(order.id) % 100 == 0)
+//                System.out.println("  Handling Order " + order.id);
+//            for (ASIN asin : order.units.keySet()) {
+//                XPRBexpr ctr = new XPRBexpr();
+//                for (FC fc : FCs) {
+//                    if (!orderFCASINVars.get(order).containsKey(fc))
+//                        continue;
+//                    ctr.add(orderFCASINVars.get(order).get(fc).get(asin).mul(1));
+//                }
+//                problem.newCtr("OF" + order.id + "_" + asin.id, ctr.eql(order.units.get(asin)));
+//            }
+//        }
+//        System.out.println("Building order fulfillment constraint complete");
+//
+//        //order fulfillment compatibility constraint
+//        System.out.println("Start building /order fulfillment compatibility constraint...");
+//        for (Order order : orders) {
+//            if (Integer.valueOf(order.id) % 100 == 0)
+//                System.out.println("  Handling Order " + order.id);
+//            for (ASIN asin : order.units.keySet()) {
+//                for (FC fc : FCs) {
+//                    if (!orderFCASINVars.get(order).containsKey(fc))
+//                        continue;
+//                    if (!FCOrderVars.get(fc).containsKey(order))
+//                        continue;
+//                    XPRBexpr ctr = new XPRBexpr();
+//                    ctr.add(orderFCASINVars.get(order).get(fc).get(asin).mul(1));
+//                    ctr.add(FCOrderVars.get(fc).get(order).mul(-LARGE_POSITIVE));
+//                    problem.newCtr("Compatible_" + order.id + "_" + asin.id + "_" + fc.id, ctr.lEql(0));
+//                }
+//            }
+//        }
+//        System.out.println("Building order fulfillment compatibility complete");
+//
+//        System.out.println("Building model time " + (System.currentTimeMillis() - startBuildingModel));
+//
+//        long startSolving = System.currentTimeMillis();
+//        problem.mipOptimise();
+//        System.out.println("Solving time " + (System.currentTimeMillis() - startSolving));
+//        if (problem.getMIPStat() == XPRB.MIP_INFEAS) {
+//            System.out.println("MIP Infeasible!");
+//        } else if (problem.getMIPStat() == XPRB.MIP_OPTIMAL) {
+//            System.out.println("Objective: " + problem.getObjVal());
+//            System.out.println("------Inventory------");
+//            for (FC fc : inventoryVars.keySet()) {
+//                for (ASIN asin : inventoryVars.get(fc).keySet()) {
+//                    if (Math.abs(inventoryVars.get(fc).get(asin).getSol()) <= INTEGER_GAP)
+//                        continue;
+//                    System.out.println("++FC" + fc.id + "  " + asin.id + "  " + inventoryVars.get(fc).get(asin).getSol());
+//                }
+//            }
+//            System.out.println();
+//            System.out.println("------------Order Fulfillment--------");
+//            for (Order order : orders) {
+//                System.out.println("++Order " + order.id);
+//                for (FC fc : FCs) {
+//                    if (!orderFCASINVars.get(order).containsKey(fc))
+//                        continue;
+//                    for (ASIN asin : order.units.keySet()) {
+//                        if (Math.abs(orderFCASINVars.get(order).get(fc).get(asin).getSol()) <= INTEGER_GAP)
+//                            continue;
+//                        System.out.println("   FC " + fc.id + "     ASIN " + asin.id + "   " + orderFCASINVars.get(order).get(fc).get(asin).getSol());
+//                    }
+//                }
+//            }
+//        } else {
+//            System.out.println(problem.getMIPStat());
+//        }
+//
+//    }
 }
