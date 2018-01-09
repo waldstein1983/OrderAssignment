@@ -1,5 +1,6 @@
 package com.topology.f2p;
 
+import java.time.LocalTime;
 import java.util.*;
 
 public class ProblemGenerator {
@@ -35,7 +36,7 @@ public class ProblemGenerator {
         ProblemGenerator generator = new ProblemGenerator(Sortable.SORTABLE);
         generator.buildASINs(1000000);
         generator.buildFCs(5);
-        generator.buildOrders(10);
+        generator.buildOrders(100);
         generator.solveByHeuristic();
 
 //        generator.buildModel();
@@ -48,7 +49,7 @@ public class ProblemGenerator {
             ASIN asin = new ASIN(id, sortable, weight);
             ASINs.add(asin);
 
-            maxNetworkStorages.put(asin, 300);
+            maxNetworkStorages.put(asin, 3000);
         }
     }
 
@@ -87,7 +88,7 @@ public class ProblemGenerator {
                     option = ShipOption.NEXT;
             }
 
-            int orderSize = (int) (Math.random() * 3 + 1);
+            int orderSize = (int) (Math.random() * 6 + 1);
 //            int orderSize = 1;
             Map<ASIN, Integer> units = new HashMap<>();
             List<ASIN> selectedASINs = new LinkedList<>();
@@ -101,20 +102,21 @@ public class ProblemGenerator {
 
                 selectedASINs.add(target);
 
-                int unit = (int) (Math.random() * 40 + 1);
+                int unit = (int) (Math.random() * 4 + 1);
 
                 units.put(target, unit);
             }
             int hour = (int) (Math.random() * 23 + 1);
 
-            Order order = new Order(units, "" + i, option, x, y, hour);
-//            orders.add(order);
+            LocalTime orderTime = LocalTime.of(hour,0);
+
+            Order order = new Order(units, "" + i, option, x, y, orderTime);
             id_Orders.put(order.id, order);
 
-            if (!hour_OrderIds.containsKey(hour)) {
-                hour_OrderIds.put(hour, new LinkedList<>());
+            if (!hour_OrderIds.containsKey(orderTime.getHour())) {
+                hour_OrderIds.put(orderTime.getHour(), new LinkedList<>());
             }
-            hour_OrderIds.get(hour).add(order.id);
+            hour_OrderIds.get(orderTime.getHour()).add(order.id);
 
             sortedShippingDistances.put(order, sorted);
 
@@ -130,7 +132,7 @@ public class ProblemGenerator {
             double unitProcessingCost = 0.55;
             double packagingCost = 0.43;
             double unitStorageCost = 0.05;
-            int storageCapacity = 100;
+            int storageCapacity = 400;
             FC fc = new FC(id, x, y, sortable, unitProcessingCost, packagingCost, unitStorageCost,
                     storageCapacity);
             FCs.add(fc);
@@ -318,6 +320,24 @@ public class ProblemGenerator {
     }
 
     private void printSummary(){
+
+        System.out.println();
+        System.out.println("########################");
+        System.out.println();
+
+        int numNonFulfilledOrders = 0;
+        for(String orderId : id_Orders.keySet()){
+            if(id_Orders.get(orderId).status != OrderStatus.FULFILLED){
+                numNonFulfilledOrders++;
+                System.out.println("Order " + orderId + " at " + id_Orders.get(orderId).time.toString() + " is not fulfilled. Ignore it.");
+            }
+        }
+        System.out.println("Order Fulfillment Rate " + (1 - (double )numNonFulfilledOrders / id_Orders.size()));
+
+        System.out.println();
+        System.out.println("########################");
+        System.out.println();
+
         for(FC fc : FCs){
             System.out.println("--------FC " + fc.id + "--------");
             for(ASIN asin : fc.storages.keySet()){
@@ -448,12 +468,7 @@ public class ProblemGenerator {
     private void solveByHeuristic() {
         initFCStorage();
 
-        for(String orderId : id_Orders.keySet()){
-            if(id_Orders.get(orderId).status != OrderStatus.FULFILLED){
-                System.out.println("Order " + orderId + " at hour " + id_Orders.get(orderId).hour + " is not fulfilled. Ignore it.");
-//                return;
-            }
-        }
+
 
         printSummary();
 
