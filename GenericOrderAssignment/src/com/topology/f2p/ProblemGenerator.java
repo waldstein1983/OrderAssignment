@@ -14,13 +14,14 @@ public class ProblemGenerator {
     final int FIRST_K_CLOSEST = 7;
     Sortable sortable;
     List<FC> FCs = new ArrayList<>();
-//    List<Order> orders = new ArrayList<>();
-    Map<String, Order> idOrders = new HashMap<>();
-    Map<Integer, List<String>> hourOrderIds = new HashMap<>();
+    Map<String, Order> id_Orders = new HashMap<>();
+    Map<Integer, List<String>> hour_OrderIds = new HashMap<>();
     List<ASIN> ASINs = new ArrayList<>();
     double max_X = 10000;
     double max_Y = 10000;
     Map<Order, Map<FC, Double>> sortedShippingDistances = new HashMap<>();
+
+    Map<ASIN, Integer> maxNetworkStorages = new HashMap<>();
 //    Map<Order, Map<FC, Double>> sortedShippingCosts = new HashMap<>();
     Map<Order, List<Shipment>> shipments = new HashMap<>();
 //    XPRB bcl = new XPRB();
@@ -32,7 +33,7 @@ public class ProblemGenerator {
 
     public static void main(String[] args) {
         ProblemGenerator generator = new ProblemGenerator(Sortable.SORTABLE);
-        generator.buildASINs(700);
+        generator.buildASINs(1000000);
         generator.buildFCs(5);
         generator.buildOrders(10);
         generator.solveByHeuristic();
@@ -42,10 +43,12 @@ public class ProblemGenerator {
 
     void buildASINs(int size) {
         for (int i = 0; i < size; i++) {
-            String id = "" + i;
+            String id = "ASIN" + i;
             double weight = Math.random() * 20 + 1;
             ASIN asin = new ASIN(id, sortable, weight);
             ASINs.add(asin);
+
+            maxNetworkStorages.put(asin, 300);
         }
     }
 
@@ -98,7 +101,7 @@ public class ProblemGenerator {
 
                 selectedASINs.add(target);
 
-                int unit = (int) (Math.random() * 50 + 1);
+                int unit = (int) (Math.random() * 40 + 1);
 
                 units.put(target, unit);
             }
@@ -106,12 +109,12 @@ public class ProblemGenerator {
 
             Order order = new Order(units, "" + i, option, x, y, hour);
 //            orders.add(order);
-            idOrders.put(order.id, order);
+            id_Orders.put(order.id, order);
 
-            if (!hourOrderIds.containsKey(hour)) {
-                hourOrderIds.put(hour, new LinkedList<>());
+            if (!hour_OrderIds.containsKey(hour)) {
+                hour_OrderIds.put(hour, new LinkedList<>());
             }
-            hourOrderIds.get(hour).add(order.id);
+            hour_OrderIds.get(hour).add(order.id);
 
             sortedShippingDistances.put(order, sorted);
 
@@ -158,6 +161,29 @@ public class ProblemGenerator {
 //        packages.put(order, pack);
 
 
+    }
+
+    int getNetworkStorage(ASIN asin){
+        int storage = 0;
+        for(FC fc : FCs){
+            if(fc.storages.containsKey(asin)){
+                storage += fc.storages.get(asin);
+            }
+        }
+        return storage;
+    }
+
+    boolean isNetworkStorageViolated(Order order){
+//        int networkStorage =getNetworkStorage()
+        for(ASIN asin : order.units.keySet()){
+            int networkStorage = getNetworkStorage(asin);
+            if(networkStorage + order.units.get(asin) > maxNetworkStorages.get(asin)){
+                System.out.println("Order " + order.id + "-> ASIN " + asin.id + " " + (networkStorage + order.units.get(asin)) + " violates max. network storage " + maxNetworkStorages.get(asin));
+                return false;
+            }
+        }
+
+        return true;
     }
 
     boolean isFCFulfillable(FC fc, Order order) {
@@ -272,7 +298,7 @@ public class ProblemGenerator {
         Shipment splitShipment = new Shipment(targetSplitContext.originalShipment.orderId, targetSplitContext.originalShipment.orderId + "-" + (targetSplitContext.originalShipment.count + 1),
                 targetSplitContext.content,
                 targetSplitContext.newFC);
-        shipments.get(idOrders.get(targetSplitContext.originalShipment.orderId)).add(splitShipment);
+        shipments.get(id_Orders.get(targetSplitContext.originalShipment.orderId)).add(splitShipment);
         //update target FC inventory
         for (ASIN asin : targetSplitContext.content.keySet()) {
             if (!targetSplitContext.newFC.storages.containsKey(asin))
@@ -289,6 +315,31 @@ public class ProblemGenerator {
             current -= targetSplitContext.originalShipment.units.get(asin);
             targetSplitContext.originalShipment.fc.storages.put(asin, current);
         }
+    }
+
+    private void printSummary(){
+        for(FC fc : FCs){
+            System.out.println("--------FC " + fc.id + "--------");
+            for(ASIN asin : fc.storages.keySet()){
+                System.out.println("      " + asin.id + " " + fc.storages.get(asin));
+            }
+        }
+
+        System.out.println();
+        System.out.println("########################");
+        System.out.println();
+
+        for(Order order : shipments.keySet()){
+            System.out.println("--------Order " + order.id + "---------");
+            for(Shipment shipment : shipments.get(order)){
+                System.out.println("  Shipment " + shipment.shipmentId);
+                for(ASIN asin : shipment.units.keySet()){
+                    System.out.println("      " + asin.id + " " + shipment.units.get(asin));
+                }
+            }
+        }
+
+
     }
 
     void neighborhoodSearchwithoutSplit() {
@@ -363,29 +414,48 @@ public class ProblemGenerator {
         targetShipment.fc = targetFC;
     }
 
-    private void solveByHeuristic() {
+    void initFCStorage(){
         //For each hour, consolidate demand of each ASIN
         //orders are not split
         for (int i = 0; i < 24; i++) {
-            if (!hourOrderIds.containsKey(i))
+            if (!hour_OrderIds.containsKey(i))
                 continue;
-            for (String orderId : hourOrderIds.get(i)) {
+            for (String orderId : hour_OrderIds.get(i)) {
                 System.out.println("Initially Handling Order " + orderId);
                 boolean beFulfilled = false;
-                for (FC fc : sortedShippingDistances.get(idOrders.get(orderId)).keySet()) {
-                    if (isFCFulfillable(fc, idOrders.get(orderId))) {
-                        beFulfilled = true;
-                        updateInventory(fc, idOrders.get(orderId));
-                        System.out.println("Order " + orderId + " is fulfilled by FC " + fc.id);
-                        idOrders.get(orderId).status = OrderStatus.FULFILLED;
-                        break;
+                for (FC fc : sortedShippingDistances.get(id_Orders.get(orderId)).keySet()) {
+                    if (!isFCFulfillable(fc, id_Orders.get(orderId))) {
+                        continue;
                     }
+
+                    if(!isNetworkStorageViolated(id_Orders.get(orderId))){
+                        return;
+                    }
+
+                    beFulfilled = true;
+                    updateInventory(fc, id_Orders.get(orderId));
+                    System.out.println("Order " + orderId + " is fulfilled by FC " + fc.id);
+                    id_Orders.get(orderId).status = OrderStatus.FULFILLED;
+                    break;
                 }
                 if(!beFulfilled){
                     System.out.println("Order " + orderId + " is not fulfilled");
                 }
             }
         }
+    }
+
+    private void solveByHeuristic() {
+        initFCStorage();
+
+        for(String orderId : id_Orders.keySet()){
+            if(id_Orders.get(orderId).status != OrderStatus.FULFILLED){
+                System.out.println("Order " + orderId + " at hour " + id_Orders.get(orderId).hour + " is not fulfilled. Ignore it.");
+//                return;
+            }
+        }
+
+        printSummary();
 
         int step = 0;
         while (step <= 9) {
@@ -394,7 +464,6 @@ public class ProblemGenerator {
 //            neighborhoodSearchwithoutSplit();
             neighborhoodSearchwithSplit();
         }
-
     }
 
 //    void buildModel() {
