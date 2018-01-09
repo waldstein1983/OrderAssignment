@@ -12,6 +12,8 @@ public class Order {
     int hour;
     int minute;
 
+    OrderStatus status  = OrderStatus.UNFULFILLED;
+
     boolean prime;
     double score;
 

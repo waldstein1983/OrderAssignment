@@ -14,14 +14,14 @@ public class ProblemGenerator {
     final int FIRST_K_CLOSEST = 7;
     Sortable sortable;
     List<FC> FCs = new ArrayList<>();
-    List<Order> orders = new ArrayList<>();
+//    List<Order> orders = new ArrayList<>();
     Map<String, Order> idOrders = new HashMap<>();
-    Map<Integer, List<Order>> hourOrders = new HashMap<>();
+    Map<Integer, List<String>> hourOrderIds = new HashMap<>();
     List<ASIN> ASINs = new ArrayList<>();
     double max_X = 10000;
     double max_Y = 10000;
     Map<Order, Map<FC, Double>> sortedShippingDistances = new HashMap<>();
-    Map<Order, Map<FC, Double>> sortedShippingCosts = new HashMap<>();
+//    Map<Order, Map<FC, Double>> sortedShippingCosts = new HashMap<>();
     Map<Order, List<Shipment>> shipments = new HashMap<>();
 //    XPRB bcl = new XPRB();
 //    XPRBprob problem = bcl.newProb("Problem");
@@ -33,8 +33,8 @@ public class ProblemGenerator {
     public static void main(String[] args) {
         ProblemGenerator generator = new ProblemGenerator(Sortable.SORTABLE);
         generator.buildASINs(700);
-        generator.buildFCs(10);
-        generator.buildOrders(100);
+        generator.buildFCs(5);
+        generator.buildOrders(10);
         generator.solveByHeuristic();
 
 //        generator.buildModel();
@@ -98,20 +98,20 @@ public class ProblemGenerator {
 
                 selectedASINs.add(target);
 
-                int unit = (int) (Math.random() * 10 + 1);
+                int unit = (int) (Math.random() * 50 + 1);
 
                 units.put(target, unit);
             }
             int hour = (int) (Math.random() * 23 + 1);
 
             Order order = new Order(units, "" + i, option, x, y, hour);
-            orders.add(order);
+//            orders.add(order);
             idOrders.put(order.id, order);
 
-            if (!hourOrders.containsKey(hour)) {
-                hourOrders.put(hour, new LinkedList<>());
+            if (!hourOrderIds.containsKey(hour)) {
+                hourOrderIds.put(hour, new LinkedList<>());
             }
-            hourOrders.get(hour).add(order);
+            hourOrderIds.get(hour).add(order.id);
 
             sortedShippingDistances.put(order, sorted);
 
@@ -134,14 +134,6 @@ public class ProblemGenerator {
         }
     }
 
-    int getCurrentStorage(FC fc) {
-        int storage = 0;
-        for (ASIN asin : fc.inventories.keySet()) {
-            storage += fc.inventories.get(asin);
-        }
-        return storage;
-    }
-
     void updateInventory(FC fc, Order order) {
         if (!shipments.containsKey(order))
             shipments.put(order, new ArrayList<>());
@@ -150,17 +142,18 @@ public class ProblemGenerator {
 
         for (ASIN asin : order.units.keySet()) {
             int curInv;
-            if (fc.inventories.containsKey(asin)) {
-                curInv = fc.inventories.get(asin);
+            if (fc.storages.containsKey(asin)) {
+                curInv = fc.storages.get(asin);
             } else
                 curInv = 0;
             curInv += order.units.get(asin);
-            fc.inventories.put(asin, curInv);
+            fc.storages.put(asin, curInv);
 
             packageUnits.put(asin, order.units.get(asin));
         }
 
-        Shipment shipment = new Shipment(order.id, order.id + "-1", packageUnits, fc);
+        Shipment shipment = new Shipment(order.id, order.id + "-0", packageUnits, fc);
+        shipment.count = 0;
         shipments.get(order).add(shipment);
 //        packages.put(order, pack);
 
@@ -168,10 +161,11 @@ public class ProblemGenerator {
     }
 
     boolean isFCFulfillable(FC fc, Order order) {
-        int currentStorage = getCurrentStorage(fc);
+        int currentStorage = fc.getTotalInventory();
         for (ASIN asin : order.units.keySet()) {
             currentStorage += order.units.get(asin);
             if (currentStorage > fc.storageCapacity) {
+                System.out.println("Order " + order.id + "->" + " FC " + fc.id + " violates storage capacity");
                 return false;
             }
         }
@@ -194,12 +188,11 @@ public class ProblemGenerator {
         return total;
     }
 
-    List<Map<ASIN, Integer>> findASINUnitsCombos(Shipment shipment) {
+    private List<Map<ASIN, Integer>> findASINUnitsCombos(Shipment shipment) {
         List<Map<ASIN, Integer>> combination = new ArrayList<>();
 
         List<Set<ASIN>> ASINcombos = new ArrayList<>();
-        List<ASIN> ASINset = new ArrayList<>();
-        ASINset.addAll(shipment.units.keySet());
+        List<ASIN> ASINset = new ArrayList<>(shipment.units.keySet());
         for (int i = 1; i < ASINset.size(); i++) {
             List<Set<ASIN>> combos = Utils.getSubsets(ASINset, i);
             ASINcombos.addAll(combos);
@@ -215,7 +208,7 @@ public class ProblemGenerator {
         return combination;
     }
 
-    Map<ASIN, Integer> splitShipment(Shipment shipment, Map<ASIN, Integer> split) {
+    private Map<ASIN, Integer> splitShipment(Shipment shipment, Map<ASIN, Integer> split) {
         Map<ASIN, Integer> afterSplit = new HashMap<>();
         for (ASIN asin : shipment.units.keySet()) {
             if (split.containsKey(asin))
@@ -225,7 +218,7 @@ public class ProblemGenerator {
         return afterSplit;
     }
 
-    void neighborhoodSearchwithSplit() {
+    private void neighborhoodSearchwithSplit() {
         Map<SplitContext, Double> splitScores = new HashMap<>();
         for (Order order : shipments.keySet()) {
             for (Shipment shipment : shipments.get(order)) {
@@ -238,7 +231,7 @@ public class ProblemGenerator {
                             if (fc.getTotalInventory() + getTotalUnits(splitUnits) > fc.storageCapacity)
                                 continue;
                             double originalCost = 0;
-                            originalCost += ShippingCost.cost(getTotalWeight(shipment.units), sortedShippingDistances.get(order).get(fc));
+                            originalCost += ShippingCost.cost(getTotalWeight(shipment.units), sortedShippingDistances.get(order).get(shipment.fc));
                             originalCost += shipment.fc.packagingCost;
                             originalCost += getTotalUnits(shipment.units) * shipment.fc.unitStorageCost;
                             originalCost += getTotalUnits(shipment.units) * shipment.fc.unitProcessingCost;
@@ -249,7 +242,7 @@ public class ProblemGenerator {
                             newCost += getTotalUnits(splitUnits) * fc.unitStorageCost;
                             newCost += getTotalUnits(splitUnits) * fc.unitProcessingCost;
 
-                            newCost += ShippingCost.cost(getTotalWeight(afterSplit), sortedShippingDistances.get(order).get(fc));
+                            newCost += ShippingCost.cost(getTotalWeight(afterSplit), sortedShippingDistances.get(order).get(shipment.fc));
                             newCost += shipment.fc.packagingCost;
                             newCost += getTotalUnits(afterSplit) * shipment.fc.unitStorageCost;
                             newCost += getTotalUnits(afterSplit) * shipment.fc.unitProcessingCost;
@@ -266,7 +259,7 @@ public class ProblemGenerator {
             }
         }
 
-        if (splitScores.size() == 0) {
+        if (splitScores.isEmpty()) {
             System.out.println("No potential cost improvement found by changing fulfillment FC for the split context...");
             return;
         }
@@ -275,24 +268,26 @@ public class ProblemGenerator {
         SplitContext targetSplitContext = (SplitContext) sortedSplitScores.keySet().toArray()[0];
 
         //build a new shipment for split content
-        Shipment splitShipment = new Shipment(targetSplitContext.originalShipment.orderId, targetSplitContext.originalShipment.shipmentId + "_Split", targetSplitContext.content,
+
+        Shipment splitShipment = new Shipment(targetSplitContext.originalShipment.orderId, targetSplitContext.originalShipment.orderId + "-" + (targetSplitContext.originalShipment.count + 1),
+                targetSplitContext.content,
                 targetSplitContext.newFC);
         shipments.get(idOrders.get(targetSplitContext.originalShipment.orderId)).add(splitShipment);
         //update target FC inventory
         for (ASIN asin : targetSplitContext.content.keySet()) {
-            if (!targetSplitContext.newFC.inventories.containsKey(asin))
-                targetSplitContext.newFC.inventories.put(asin, 0);
-            int current = targetSplitContext.newFC.inventories.get(asin);
+            if (!targetSplitContext.newFC.storages.containsKey(asin))
+                targetSplitContext.newFC.storages.put(asin, 0);
+            int current = targetSplitContext.newFC.storages.get(asin);
             current += targetSplitContext.content.get(asin);
-            targetSplitContext.newFC.inventories.put(asin, current);
+            targetSplitContext.newFC.storages.put(asin, current);
         }
         //update orignal FC inventory
         for(ASIN asin : targetSplitContext.content.keySet()){
             targetSplitContext.originalShipment.units.remove(asin);
 
-            int current = targetSplitContext.originalShipment.fc.inventories.get(asin);
+            int current = targetSplitContext.originalShipment.fc.storages.get(asin);
             current -= targetSplitContext.originalShipment.units.get(asin);
-            targetSplitContext.originalShipment.fc.inventories.put(asin, current);
+            targetSplitContext.originalShipment.fc.storages.put(asin, current);
         }
     }
 
@@ -307,19 +302,32 @@ public class ProblemGenerator {
                         if (fc.getTotalInventory() + getTotalUnits(shipment.units) > fc.storageCapacity)
                             continue;
 
-                        double fcShippingCost = ShippingCost.cost(getTotalWeight(shipment.units), sortedShippingDistances.get(order).get(fc));
-                        double currentShippingCost = ShippingCost.cost(getTotalWeight(shipment.units), sortedShippingDistances.get(order).get(shipment.fc));
-                        shipment.score = currentShippingCost - fcShippingCost;
+                        double originalCost = 0;
+                        originalCost += ShippingCost.cost(getTotalWeight(shipment.units), sortedShippingDistances.get(order).get(shipment.fc));
+                        originalCost += shipment.fc.packagingCost;
+                        originalCost += getTotalUnits(shipment.units) * shipment.fc.unitStorageCost;
+                        originalCost += getTotalUnits(shipment.units) * shipment.fc.unitProcessingCost;
 
-                        shipment.score += shipment.fc.packagingCost - fc.packagingCost;
+                        double newCost = 0;
+                        newCost += ShippingCost.cost(getTotalWeight(shipment.units), sortedShippingDistances.get(order).get(fc));
+                        newCost += fc.packagingCost;
+                        newCost += getTotalUnits(shipment.units) * fc.unitStorageCost;
+                        newCost += getTotalUnits(shipment.units) * fc.unitProcessingCost;
 
-                        shipment.score += getTotalUnits(shipment.units) * (shipment.fc.unitStorageCost - fc.unitStorageCost);
-                        shipment.score += getTotalUnits(shipment.units) * (shipment.fc.unitProcessingCost - fc.unitProcessingCost);
+//                        double fcShippingCost = ShippingCost.cost(getTotalWeight(shipment.units), sortedShippingDistances.get(order).get(fc));
+//                        double currentShippingCost = ShippingCost.cost(getTotalWeight(shipment.units), sortedShippingDistances.get(order).get(shipment.fc));
+//                        shipment.score = currentShippingCost - fcShippingCost;
+//
+//                        shipment.score += shipment.fc.packagingCost - fc.packagingCost;
+//
+//                        shipment.score += getTotalUnits(shipment.units) * (shipment.fc.unitStorageCost - fc.unitStorageCost);
+//                        shipment.score += getTotalUnits(shipment.units) * (shipment.fc.unitProcessingCost - fc.unitProcessingCost);
+                        double score = originalCost - newCost;
 
-                        if (shipment.score <= 0)
+                        if (score <= 0)
                             continue;
 
-                        shipmentScores.put(shipment, shipment.score);
+                        shipmentScores.put(shipment, score);
                         shipmentTargetFCs.put(shipment, fc);
 //                        break;
                     }
@@ -327,7 +335,7 @@ public class ProblemGenerator {
             }
         }
 
-        if (shipmentScores.size() == 0) {
+        if (shipmentScores.isEmpty()) {
             System.out.println("No potential cost improvement found by changing fulfillment FC for the whole package...");
             return;
         }
@@ -338,35 +346,43 @@ public class ProblemGenerator {
 
         //update target FC inventory
         for (ASIN asin : targetShipment.units.keySet()) {
-            if (!targetFC.inventories.containsKey(asin))
-                targetFC.inventories.put(asin, 0);
-            int current = targetFC.inventories.get(asin);
+            if (!targetFC.storages.containsKey(asin))
+                targetFC.storages.put(asin, 0);
+            int current = targetFC.storages.get(asin);
             current += targetShipment.units.get(asin);
-            targetFC.inventories.put(asin, current);
+            targetFC.storages.put(asin, current);
         }
-        //update orignal FC inventory
+        //update original FC inventory
         for (ASIN asin : targetShipment.units.keySet()) {
-            int current = targetShipment.fc.inventories.get(asin);
+            int current = targetShipment.fc.storages.get(asin);
             current -= targetShipment.units.get(asin);
-            targetShipment.fc.inventories.put(asin, current);
+            targetShipment.fc.storages.put(asin, current);
         }
 
         //update shipment information
         targetShipment.fc = targetFC;
     }
 
-    void solveByHeuristic() {
+    private void solveByHeuristic() {
         //For each hour, consolidate demand of each ASIN
         //orders are not split
         for (int i = 0; i < 24; i++) {
-            if (!hourOrders.containsKey(i))
+            if (!hourOrderIds.containsKey(i))
                 continue;
-            for (Order order : hourOrders.get(i)) {
-                for (FC fc : sortedShippingDistances.get(order).keySet()) {
-                    if (isFCFulfillable(fc, order)) {
-                        updateInventory(fc, order);
+            for (String orderId : hourOrderIds.get(i)) {
+                System.out.println("Initially Handling Order " + orderId);
+                boolean beFulfilled = false;
+                for (FC fc : sortedShippingDistances.get(idOrders.get(orderId)).keySet()) {
+                    if (isFCFulfillable(fc, idOrders.get(orderId))) {
+                        beFulfilled = true;
+                        updateInventory(fc, idOrders.get(orderId));
+                        System.out.println("Order " + orderId + " is fulfilled by FC " + fc.id);
+                        idOrders.get(orderId).status = OrderStatus.FULFILLED;
                         break;
                     }
+                }
+                if(!beFulfilled){
+                    System.out.println("Order " + orderId + " is not fulfilled");
                 }
             }
         }
@@ -375,24 +391,9 @@ public class ProblemGenerator {
         while (step <= 9) {
             step++;
             System.out.println("### Step " + step);
-            neighborhoodSearchwithoutSplit();
+//            neighborhoodSearchwithoutSplit();
+            neighborhoodSearchwithSplit();
         }
-
-
-        //ASIN neighborhood search
-
-
-        //target on the FCs whose inventory violate capacity
-        //For each target FC, target on the orders which are assigned to the FC.
-        //For each order, compute a cost if assign it to the second least shipping cost FC. Compute a score based on the cost difference and the increasing storaging cost of second
-        //least cost FC
-        //Repeat above steps until all FCs do not violate storage capacity
-
-        //Find the most promising move which can decrease the total cost
-        // -- if no_spit first, target on those orders which are split
-        // For the target order,
-        // -- if total cost first, target on order has largest cost (shipping cost + packaging cost + unit processing cost - storage cost)
-        // For the target order, find another fulfillment way. If no other way is found, continue to next order
 
     }
 

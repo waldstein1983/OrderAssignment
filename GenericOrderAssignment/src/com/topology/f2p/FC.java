@@ -5,7 +5,7 @@ import java.util.Map;
 
 public class FC {
     String id;
-    Map<ASIN, Integer> inventories = new HashMap<>();
+    Map<ASIN, Integer> storages = new HashMap<>();
     double x;
     double y;
     Sortable sortable;
@@ -36,8 +36,8 @@ public class FC {
 
     public int getTotalInventory() {
         int total = 0;
-        for (ASIN asin : inventories.keySet()) {
-            total += inventories.get(asin);
+        for (ASIN asin : storages.keySet()) {
+            total += storages.get(asin);
         }
         return total;
     }

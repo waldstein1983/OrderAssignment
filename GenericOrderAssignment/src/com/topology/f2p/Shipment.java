@@ -10,7 +10,8 @@ public class Shipment {
     FC fc;
     //    double x;
 //    double y;
-    double score;
+//    double score;
+    int count;
 
     public Shipment(String orderId, String shipmentId, Map<ASIN, Integer> units, FC fc) {
         this.orderId = orderId;
